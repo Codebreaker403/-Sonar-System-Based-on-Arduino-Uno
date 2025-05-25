@@ -1,0 +1,270 @@
+import processing.serial.*;
+
+Serial myPort;
+String angle="";
+String distance="";
+String data="";
+int iAngle, iDistance;
+PImage backgroundImage;
+String imagePath = "C:\\Users\\Me\\Downloads\\Capture.JPG";
+
+ArrayList<PVector> previousPositions = new ArrayList<PVector>();
+final int MAX_POSITIONS = 100;
+long lastSerialCheck = 0;
+final int SERIAL_CHECK_INTERVAL = 10;
+
+void setup() {
+  size(1200, 700);
+  smooth();
+  frameRate(30);
+  
+  try {
+    backgroundImage = loadImage(imagePath);
+    if (backgroundImage != null) {
+      backgroundImage.resize(width, height);
+      println("Image loaded successfully");
+    } else {
+      println("Failed to load image from: " + imagePath);
+    }
+  } catch (Exception e) {
+    println("Error loading background image: " + e.getMessage());
+  }
+  
+  try {
+    myPort = new Serial(this, "COM6", 9600);
+    myPort.bufferUntil('.');
+    myPort.clear();
+  } catch (Exception e) {
+    println("Error initializing serial communication: " + e.getMessage());
+  }
+}
+
+void draw() {
+  background(0);
+  
+  if (backgroundImage != null) {
+    tint(255, 150);
+    image(backgroundImage, 0, 0);
+    noTint();
+  }
+
+  drawRadar();
+  drawPreviousPositions();
+  drawObject();
+  drawLine();
+  drawText();
+  
+  if (myPort != null && millis() - lastSerialCheck > SERIAL_CHECK_INTERVAL) {
+    if (myPort.available() > 0) {
+      try {
+        myPort.clear();
+      } catch (Exception e) {
+        println("Serial port error: " + e.getMessage());
+      }
+    }
+    lastSerialCheck = millis();
+  }
+}
+
+void serialEvent(Serial myPort) {
+  try {
+    if (myPort.available() > 0) {
+      data = myPort.readStringUntil('.');
+      if (data != null && data.length() > 0) {
+        data = data.trim();
+        
+        if (data.length() > 50) {
+          return;
+        }
+        
+        int index1 = data.indexOf(",");
+        if (index1 > 0 && index1 < data.length() - 1) {
+          angle = data.substring(0, index1);
+          distance = data.substring(index1 + 1);
+
+          if (isNumeric(angle) && isNumeric(distance)) {
+            int tempAngle = int(angle);
+            int tempDistance = int(distance);
+            
+            if (tempAngle >= 0 && tempAngle <= 180 && tempDistance >= 0 && tempDistance <= 400) {
+              iAngle = tempAngle;
+              iDistance = tempDistance;
+
+              if (iDistance < 40) {
+                float pixsDistance = iDistance * ((height - height * 0.1666) * 0.025);
+                float x = pixsDistance * cos(radians(iAngle));
+                float y = -pixsDistance * sin(radians(iAngle));
+                
+                previousPositions.add(new PVector(x, y));
+                while (previousPositions.size() > MAX_POSITIONS) {
+                  previousPositions.remove(0);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (Exception e) {
+    println("Error processing serial data: " + e.getMessage());
+    if (myPort != null) {
+      myPort.clear();
+    }
+  }
+}
+
+void drawRadar() {
+  pushMatrix();
+  translate(width/2, height-height*0.074);
+  noFill();
+  
+  // Draw more concentric circles
+  strokeWeight(1.5);
+  stroke(98, 245, 31);
+  for (float r = width*0.05; r <= width*0.5; r += width*0.05) {
+    arc(0, 0, r, r, PI, TWO_PI);
+  }
+  
+  // Draw many thin radial lines
+  stroke(98, 245, 31, 100);
+  strokeWeight(0.5);
+  for (int angle = 0; angle <= 180; angle += 3) {
+    line(0, 0, (-width/2)*cos(radians(angle)), (-width/2)*sin(radians(angle)));
+  }
+  
+  // Draw main radial lines
+  stroke(98, 245, 31);
+  strokeWeight(2);
+  for (int angle = 0; angle <= 180; angle += 30) {
+    line(0, 0, (-width/2)*cos(radians(angle)), (-width/2)*sin(radians(angle)));
+  }
+  
+  popMatrix();
+}
+
+void drawPreviousPositions() {
+  pushMatrix();
+  translate(width/2, height-height*0.074);
+  noStroke();
+  fill(0, 0, 255, 180);
+
+  synchronized(previousPositions) {
+    for (int i = previousPositions.size() - 1; i >= 0; i--) {
+      PVector pos = previousPositions.get(i);
+      if (!Float.isNaN(pos.x) && !Float.isNaN(pos.y)) {
+        ellipse(pos.x, pos.y, 8, 8);  // Slightly larger dots
+      }
+    }
+  }
+  popMatrix();
+}
+
+void drawObject() {
+  if (iDistance < 40) {
+    pushMatrix();
+    translate(width/2, height-height*0.074);
+    
+    // Draw object with glow effect
+    float pixsDistance = iDistance * ((height-height*0.1666)*0.025);
+    float startX = pixsDistance * cos(radians(iAngle-20));  // Wider angle
+    float startY = -pixsDistance * sin(radians(iAngle-20));
+    float endX = pixsDistance * cos(radians(iAngle+20));
+    float endY = -pixsDistance * sin(radians(iAngle+20));
+    
+    // Glow effect
+    for(int i = 5; i > 0; i--) {
+      noStroke();
+      fill(255, 0, 0, 50/i);
+      beginShape();
+      vertex(startX-i*2, startY-i*2);
+      vertex(endX+i*2, endY-i*2);
+      vertex(endX+i*2, endY+40+i*2);  // Taller rectangle
+      vertex(startX-i*2, startY+40+i*2);
+      endShape(CLOSE);
+    }
+    
+    // Main object
+    noStroke();
+    fill(255, 0, 0, 220);
+    beginShape();
+    vertex(startX, startY);
+    vertex(endX, endY);
+    vertex(endX, endY+40);  // Taller rectangle
+    vertex(startX, startY+40);
+    endShape(CLOSE);
+    
+    popMatrix();
+  }
+}
+
+void drawLine() {
+  pushMatrix();
+  translate(width/2, height-height*0.074);
+  
+  // Scanning line with glow effect
+  for(int i = 5; i > 0; i--) {
+    stroke(30, 250, 60, 150/i);
+    strokeWeight(3);
+    line(0, 0, (height-height*0.12)*cos(radians(iAngle)), -(height-height*0.12)*sin(radians(iAngle)));
+  }
+  
+  popMatrix();
+}
+
+void drawText() {
+  // Background panel with rounded corners
+  noStroke();
+  fill(0, 230);
+  rect(0, height-80, width, 80, 15);
+  
+  // Subtle highlight
+  stroke(98, 245, 31, 50);
+  strokeWeight(1);
+  line(0, height-80, width, height-80);
+  
+  textAlign(CENTER, CENTER);
+  
+  // Angle and distance display with glow
+  textSize(22);
+  String angleText = "Angle: " + iAngle + "°";
+  String distanceText = "Distance: " + (iDistance < 40 ? iDistance + " cm" : "ALL CLEAR - NO THREAT");
+  
+  // Text glow effect
+  for(int i = 3; i > 0; i--) {
+    fill(98, 245, 31, 50/i);
+    text(angleText, width/4 + i, height-50 + i);
+    text(distanceText, width/2 + i, height-50 + i);
+  }
+  
+  // Main text
+  fill(98, 245, 31);
+  text(angleText, width/4, height-50);
+  text(distanceText, width/2, height-50);
+  
+  // Signature with gold effect
+  textSize(18);
+  for(int i = 3; i > 0; i--) {
+    fill(255, 220, 0, 80/i);
+    text("Rasim Rana Block", 3*width/4 + i, height-25 + i);
+  }
+  fill(255, 220, 0);
+  text("Rasim Rana Block", 3*width/4, height-25);
+}
+
+boolean isNumeric(String str) {
+  if (str == null || str.isEmpty()) return false;
+  try {
+    Float.parseFloat(str);
+    return true;
+  } catch (NumberFormatException e) {
+    return false;
+  }
+}
+
+void stop() {
+  if (myPort != null) {
+    myPort.clear();
+    myPort.stop();
+  }
+  super.stop();
+}

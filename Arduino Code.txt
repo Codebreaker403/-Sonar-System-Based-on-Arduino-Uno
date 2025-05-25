@@ -1,0 +1,159 @@
+import processing.serial.*;
+import processing.sound.*;
+
+Serial myPort;
+String angle = "";
+String distance = "";
+String data = "";
+int iAngle, iDistance;
+PImage backgroundImage;
+String imagePath = "C:\\Users\\Me\\Downloads\\Capture.JPG";  // Change the path as needed
+
+ArrayList<PVector> previousPositions = new ArrayList<PVector>();
+final int MAX_POSITIONS = 100;
+long lastSerialCheck = 0;
+final int SERIAL_CHECK_INTERVAL = 10;
+
+// Sound objects for each alert type
+SoundFile highAlertSound, mediumAlertSound, lowAlertSound, noObjectSound;
+
+void setup() {
+  size(1200, 700);
+  smooth();
+  frameRate(30);
+  
+  try {
+    backgroundImage = loadImage(imagePath);
+    if (backgroundImage != null) {
+      backgroundImage.resize(width, height);
+      println("Image loaded successfully");
+    } else {
+      println("Failed to load image from: " + imagePath);
+    }
+  } catch (Exception e) {
+    println("Error loading background image: " + e.getMessage());
+  }
+  
+  try {
+    myPort = new Serial(this, "COM6", 9600);  // Change COM port as needed
+    myPort.bufferUntil('.');
+    myPort.clear();
+  } catch (Exception e) {
+    println("Error initializing serial communication: " + e.getMessage());
+  }
+  
+  // Load sound files for alerts
+  highAlertSound = new SoundFile(this, "high_alert.wav");  // Replace with your file path
+  mediumAlertSound = new SoundFile(this, "medium_alert.wav");  // Replace with your file path
+  lowAlertSound = new SoundFile(this, "low_alert.wav");  // Replace with your file path
+  noObjectSound = new SoundFile(this, "no_object_detected.wav");  // Replace with your file path
+}
+
+void draw() {
+  background(0);
+  
+  if (backgroundImage != null) {
+    tint(255, 150);
+    image(backgroundImage, 0, 0);
+    noTint();
+  }
+
+  drawRadar();
+  drawPreviousPositions();
+  drawObject();
+  drawLine();
+  drawText();
+  
+  if (myPort != null && millis() - lastSerialCheck > SERIAL_CHECK_INTERVAL) {
+    if (myPort.available() > 0) {
+      try {
+        myPort.clear();
+      } catch (Exception e) {
+        println("Serial port error: " + e.getMessage());
+      }
+    }
+    lastSerialCheck = millis();
+  }
+}
+
+void serialEvent(Serial myPort) {
+  try {
+    if (myPort.available() > 0) {
+      data = myPort.readStringUntil('.');
+      if (data != null && data.length() > 0) {
+        data = data.trim();
+        
+        if (data.length() > 50) {
+          return;
+        }
+        
+        int index1 = data.indexOf(",");
+        if (index1 > 0 && index1 < data.length() - 1) {
+          angle = data.substring(0, index1);
+          distance = data.substring(index1 + 1);
+
+          if (isNumeric(angle) && isNumeric(distance)) {
+            int tempAngle = int(angle);
+            int tempDistance = int(distance);
+            
+            if (tempAngle >= 0 && tempAngle <= 180 && tempDistance >= 0 && tempDistance <= 400) {
+              iAngle = tempAngle;
+              iDistance = tempDistance;
+
+              if (iDistance < 40) {
+                playAlertSound("High");
+                float pixsDistance = iDistance * ((height - height * 0.1666) * 0.025);
+                float x = pixsDistance * cos(radians(iAngle));
+                float y = -pixsDistance * sin(radians(iAngle));
+                
+                previousPositions.add(new PVector(x, y));
+                while (previousPositions.size() > MAX_POSITIONS) {
+                  previousPositions.remove(0);
+                }
+              } else if (iDistance < 100) {
+                playAlertSound("Medium");
+              } else {
+                playAlertSound("Low");
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (Exception e) {
+    println("Error processing serial data: " + e.getMessage());
+    if (myPort != null) {
+      myPort.clear();
+    }
+  }
+}
+
+void playAlertSound(String alertType) {
+  if (alertType.equals("High")) {
+    highAlertSound.play();
+  } else if (alertType.equals("Medium")) {
+    mediumAlertSound.play();
+  } else if (alertType.equals("Low")) {
+    lowAlertSound.play();
+  } else {
+    noObjectSound.play();
+  }
+}
+
+boolean isNumeric(String str) {
+  if (str == null || str.isEmpty()) return false;
+  try {
+    Float.parseFloat(str);
+    return true;
+  } catch (NumberFormatException e) {
+    return false;
+  }
+}
+
+void stop() {
+  if (myPort != null) {
+    myPort.clear();
+    myPort.stop();
+  }
+  super.stop();
+}
